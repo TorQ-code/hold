@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { unlockAudio } from "./audio";
 import { isIOS } from "./platform";
-import { getSpeechRecognitionCtor, isVoiceBusy, parseCommand, setSpeakGate, warmJarvis } from "./voice";
+import { getSpeechRecognitionCtor, isVoiceBusy, parseCommand, setSpeakGate, speak, warmJarvis } from "./voice";
 import { useHoldStore } from "./store";
 
 export type VoiceApi = {
@@ -37,7 +37,7 @@ export function useVoice() {
     stop: () => void;
     abort: () => void;
   } | null>(null);
-  const wantRef = useRef(true);
+  const wantRef = useRef(false);
   const runningRef = useRef(false);
   const lastStopAt = useRef(0);
   const mediaRef = useRef<MediaStream | null>(null);
@@ -179,6 +179,7 @@ export function useVoice() {
           const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
           stream.getTracks().forEach((track) => track.stop());
           setVoiceError(null);
+          void speak("Ready.");
         } catch {
           setVoiceError("Allow the microphone so HOLD can start and stop by voice.");
           setNeedsGesture(true);
@@ -317,7 +318,9 @@ export function useVoice() {
 
   const overlay = useHoldStore((s) => s.timer.overlay);
   useEffect(() => {
-    if (overlay && useHoldStore.getState().settings.handsFree) start();
+    if (!overlay || !useHoldStore.getState().settings.handsFree) return;
+    const id = window.setTimeout(() => start(), 1600);
+    return () => window.clearTimeout(id);
   }, [overlay, start]);
 
   return { start, stop, toggle, pushStart, pushEnd, pushing };

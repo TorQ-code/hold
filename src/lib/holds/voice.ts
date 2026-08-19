@@ -243,6 +243,8 @@ function b64ToBytes(b64: string): ArrayBuffer {
 export function warmJarvis(extra: string[] = []) {
   if (typeof window === "undefined") return;
   const lines = [
+    "Ready.",
+    "Listening.",
     "Paused.",
     "Resuming.",
     "Timer reset.",
@@ -254,65 +256,70 @@ export function warmJarvis(extra: string[] = []) {
     "Good. Hold.",
     "That's it.",
     "Steady now.",
+    "Don't let go.",
+    "You're doing well.",
+    "Breathe. Hold.",
+    "Still strong.",
+    "Well held.",
     ...extra,
   ];
   void (async () => {
-    const { synthesizeVoice } = await import("./tts");
     for (const line of lines) {
       if (clipCache.has(line)) continue;
-      try {
-        const result = await synthesizeVoice({ data: { text: line } });
-        if (result.ok) clipCache.set(line, b64ToBytes(result.audio));
-      } catch {
-        break;
-      }
+      const clip = await fetchJarvisClip(line);
+      if (!clip) break;
+      clipCache.set(line, clip.bytes);
     }
   })();
 }
 
-async function playJarvis(text: string): Promise<void> {
-  const cached = clipCache.get(text);
-  if (cached) {
-    try {
-      await playBytes(cached.slice(0));
-      return;
-    } catch {
-      /* try a fresh synthesize */
-    }
-  }
-
+async function fetchJarvisClip(text: string): Promise<{ bytes: ArrayBuffer; type: string } | null> {
   try {
-    const { synthesizeVoice } = await import("./tts");
-    const result = await synthesizeVoice({ data: { text } });
-    if (result.ok) {
-      const bytes = b64ToBytes(result.audio);
-      if (clipCache.size > 40) {
-        const first = clipCache.keys().next().value;
-        if (first) clipCache.delete(first);
-      }
-      clipCache.set(text, bytes);
-      await playBytes(bytes.slice(0), result.type);
-      return;
-    }
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok || res.status === 204) return null;
+    const type = res.headers.get("content-type") || "audio/mpeg";
+    const bytes = await res.arrayBuffer();
+    if (!bytes.byteLength) return null;
+    return { bytes, type };
   } catch {
-    /* fall back to the browser voice */
+    return null;
   }
-  return speakBrowser(text);
 }
 
 export async function speak(text: string, opts?: { lock?: boolean }): Promise<void> {
   if (typeof window === "undefined") return;
   const line = text.trim();
   if (!line) return;
+  unlockAudio();
   const ios = isIOS();
   const lock = opts?.lock !== false || ios;
-  if (lock) markVoiceBusy(14_000);
-  const listening = Boolean(onSpeakStart);
+  if (lock) markVoiceBusy(12_000);
   stopAudio();
   onSpeakStart?.();
-  if (ios && listening) await wait(90);
+  if (ios) await wait(60);
   try {
-    await playJarvis(line);
+    const cached = clipCache.get(line);
+    if (cached) {
+      await playBytes(cached.slice(0));
+      return;
+    }
+    // Speak now so a tap always produces sound. Cache Jarvis behind it.
+    const pending = fetchJarvisClip(line).then((clip) => {
+      if (clip) {
+        if (clipCache.size > 40) {
+          const first = clipCache.keys().next().value;
+          if (first) clipCache.delete(first);
+        }
+        clipCache.set(line, clip.bytes);
+      }
+      return clip;
+    });
+    await speakBrowser(line);
+    await pending;
   } catch {
     try {
       await speakBrowser(line);

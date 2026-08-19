@@ -411,7 +411,6 @@ function MovementSection({ voice }: { voice: VoiceApi }) {
                   type="button"
                   onClick={() => {
                     unlockAudio();
-                    voice.start();
                     startTimer(m.id);
                   }}
                   className="flex flex-1 flex-col items-start text-left"

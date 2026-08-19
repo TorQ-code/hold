@@ -25,7 +25,7 @@ export function getAudioContext(): AudioContext | null {
   if (!ctx || ctx.state === "closed") {
     ctx = new Ctor();
     gain = ctx.createGain();
-    gain.gain.value = isIOS() ? 1.12 : 1.85;
+    gain.gain.value = isIOS() ? 1.25 : 2.0;
     gain.connect(ctx.destination);
   }
   return ctx;
@@ -59,7 +59,10 @@ export function unlockAudio() {
   if (typeof window === "undefined") return;
   const audio = getAudioContext();
   if (audio && audio.state !== "running") void audio.resume();
-  if (primed) return;
+  if (primed) {
+    if (audio && audio.state !== "running") void audio.resume();
+    return;
+  }
   primed = true;
   if (audio) {
     try {
@@ -108,10 +111,6 @@ export async function playBytes(bytes: ArrayBuffer, mime = "audio/mpeg"): Promis
   const audio = getAudioContext();
   if (audio && audio.state !== "running") void audio.resume();
 
-  if (isIOS()) {
-    await playViaElement(bytes, mime);
-    return;
-  }
   if (audio) {
     try {
       const buffer = await decode(audio, bytes.slice(0));
@@ -185,14 +184,17 @@ function playViaElement(bytes: ArrayBuffer, mime: string): Promise<void> {
 export async function speakBrowser(text: string): Promise<void> {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
   const synth = window.speechSynthesis;
-  synth.cancel();
+  if (synth.paused) synth.resume();
+  if (synth.speaking) synth.cancel();
+  await wait(40);
+  await voicesReady();
   await new Promise<void>((resolve) => {
     const u = new SpeechSynthesisUtterance(text);
     const voice = pickBritishVoice();
     if (voice) u.voice = voice;
     u.lang = "en-GB";
-    u.rate = 1.04;
-    u.pitch = 0.94;
+    u.rate = 1.06;
+    u.pitch = 0.92;
     u.volume = 1;
     let settled = false;
     const finish = () => {
@@ -202,8 +204,27 @@ export async function speakBrowser(text: string): Promise<void> {
     };
     u.onend = finish;
     u.onerror = finish;
-    window.setTimeout(finish, Math.min(7000, 800 + text.length * 80));
-    synth.speak(u);
+    window.setTimeout(finish, Math.min(8000, 900 + text.length * 90));
+    try {
+      synth.speak(u);
+      if (synth.paused) synth.resume();
+    } catch {
+      finish();
+    }
+  });
+}
+
+function voicesReady(): Promise<void> {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve();
+  const synth = window.speechSynthesis;
+  if (synth.getVoices().length) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      synth.removeEventListener("voiceschanged", done);
+      resolve();
+    };
+    synth.addEventListener("voiceschanged", done);
+    window.setTimeout(done, 400);
   });
 }
 

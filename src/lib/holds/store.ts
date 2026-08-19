@@ -243,17 +243,14 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
         if (!movement) return say(`I don't have ${intent.movementQuery} on file.`);
         if (timer.running && timer.movementId === movement.id) return movement.name;
         get().startTimer(movement.id, { seconds: intent.seconds });
-        return say(`Beginning ${movement.name}.`);
+        return `Beginning ${movement.name}.`;
       }
       case "stop": {
         const ms = get().elapsedMs();
         const name = movements.find((m) => m.id === timer.movementId)?.name ?? "Hold";
         if (!timer.running && !timer.overlay) return "";
-        const result = get().stopTimer();
-        let line = `${name} complete. ${formatSpokenDuration(ms)}.`;
-        if (result.personalBest) line += " Personal best.";
-        if (result.awards[0]) line += ` New award. ${result.awards[0].name}.`;
-        return say(line);
+        get().stopTimer();
+        return `${name} complete. ${formatSpokenDuration(ms)}.`;
       }
       case "pause": {
         if (!timer.running || timer.paused) return "";
@@ -311,6 +308,7 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       },
     });
     void requestWakeLock();
+    if (get().settings.speak) void speak(`Beginning ${movement.name}.`);
   },
 
   pauseTimer: () => {
@@ -379,6 +377,13 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       return next;
     });
     releaseWakeLock();
+    if (get().settings.speak && durationMs >= 800) {
+      const name = movements.find((m) => m.id === timer.movementId)?.name ?? "Hold";
+      let line = `${name} complete. ${formatSpokenDuration(durationMs)}.`;
+      if (personalBest) line += " Personal best.";
+      if (awards[0]) line += ` New award. ${awards[0].name}.`;
+      void speak(line);
+    }
     return { personalBest, awards };
   },
 
