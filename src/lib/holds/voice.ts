@@ -102,6 +102,12 @@ export function parseCommand(
   if (/^reset(\s+(the\s+)?timer)?$/.test(t)) {
     return { type: "reset" };
   }
+  if (/^(yes|yeah|yep|yup|sure|ok|okay|please|do it|add it|add that|yes please)$/.test(t)) {
+    return { type: "confirmYes" };
+  }
+  if (/^(no|nope|nah|cancel|don't|dont|do not|no thanks|no thank you)$/.test(t)) {
+    return { type: "confirmNo" };
+  }
   if (/cancel (all )?reminders?/.test(t) || t === "cancel reminder") {
     return { type: "cancelReminders" };
   }
@@ -289,7 +295,13 @@ export function resolveHeard(
   let fallback: { text: string; intent: VoiceIntent } | null = null;
   for (const text of unique) {
     const intent = parseCommand(text, ctx);
-    if (intent.type === "stop" || intent.type === "pause" || intent.type === "resume") {
+    if (
+      intent.type === "stop" ||
+      intent.type === "pause" ||
+      intent.type === "resume" ||
+      intent.type === "confirmYes" ||
+      intent.type === "confirmNo"
+    ) {
       return { text, intent };
     }
     if (intent.type === "start") {

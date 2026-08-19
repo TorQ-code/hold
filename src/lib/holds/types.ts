@@ -68,4 +68,11 @@ export type VoiceIntent =
   | { type: "remind"; minutes: number; movementQuery: string | null }
   | { type: "cancelReminders" }
   | { type: "addMovement"; name: string }
+  | { type: "confirmYes" }
+  | { type: "confirmNo" }
   | { type: "unknown"; raw: string };
+
+export type PendingAdd = {
+  name: string;
+  seconds: number | null;
+};

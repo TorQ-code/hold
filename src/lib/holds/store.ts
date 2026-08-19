@@ -10,6 +10,7 @@ import type {
   Movement,
   Reminder,
   Settings,
+  PendingAdd,
   TimerState,
   VoiceState,
 } from "./types";
@@ -33,6 +34,7 @@ type HoldStore = PersistSlice & {
   timer: TimerState;
   voice: VoiceState;
   prompt: BreakPrompt | null;
+  pendingAdd: PendingAdd | null;
   cue: string | null;
   seenAwards: Record<string, string>;
   justEarned: AwardDef[];
@@ -56,6 +58,8 @@ type HoldStore = PersistSlice & {
   fireDueReminders: () => void;
   dismissPrompt: () => void;
   acceptPrompt: () => void;
+  acceptPendingAdd: () => void;
+  declinePendingAdd: () => void;
   setListening: (on: boolean) => void;
   setTranscript: (text: string, isFinal: boolean) => void;
   setVoiceError: (error: string | null) => void;
@@ -186,6 +190,7 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
     needsGesture: false,
   },
   prompt: null,
+  pendingAdd: null,
   cue: null,
   now: Date.now(),
 
@@ -236,15 +241,34 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       return msg;
     };
 
+    const pending = get().pendingAdd;
+    if (pending && (intent.type === "confirmYes" || intent.type === "confirmNo")) {
+      if (intent.type === "confirmNo") {
+        get().declinePendingAdd();
+        return say("Okay.");
+      }
+      get().acceptPendingAdd();
+      return "";
+    }
+
     switch (intent.type) {
       case "start": {
         if (!intent.movementQuery) return say("Which exercise shall I start?");
         const movement = matchMovement(intent.movementQuery, movements);
-        if (!movement) return say(`I heard ${intent.movementQuery}. Try the name again.`);
+        if (!movement) {
+          const name = intent.movementQuery.replace(/\b\w/g, (c) => c.toUpperCase());
+          set({ pendingAdd: { name, seconds: intent.seconds } });
+          return say(`I don't have ${name} yet. Add it?`);
+        }
+        if (get().pendingAdd) set({ pendingAdd: null });
         if (timer.running && timer.movementId === movement.id) return movement.name;
         get().startTimer(movement.id, { seconds: intent.seconds });
         return `Beginning ${movement.name}.`;
       }
+      case "confirmYes":
+        return "";
+      case "confirmNo":
+        return "";
       case "stop": {
         const ms = get().elapsedMs();
         const name = movements.find((m) => m.id === timer.movementId)?.name ?? "Hold";
@@ -413,6 +437,20 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       set({ timer: { ...DEFAULT_TIMER } });
       releaseWakeLock();
     }
+  },
+
+  acceptPendingAdd: () => {
+    const pending = get().pendingAdd;
+    if (!pending) return;
+    set({ pendingAdd: null });
+    const created = get().addMovement(pending.name);
+    if (!created) return;
+    get().startTimer(created.id, { seconds: pending.seconds });
+    if (get().settings.speak) void speak(`${created.name} added. Beginning ${created.name}.`);
+  },
+
+  declinePendingAdd: () => {
+    set({ pendingAdd: null });
   },
 
   addMovement: (name, targetSeconds = null) => {

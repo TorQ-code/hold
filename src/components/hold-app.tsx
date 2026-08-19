@@ -83,6 +83,7 @@ function Shell({ voice }: { voice: VoiceApi }) {
           <>
             <AppHeader />
             <VoiceDock voice={voice} />
+            <AddOffer />
             <NextReminder onOpen={() => setView("remind")} />
             <MovementSection voice={voice} />
             <HomeNav onChange={setView} />
@@ -292,6 +293,29 @@ function VoiceDock({ voice }: { voice: VoiceApi }) {
         </p>
       ) : null}
     </section>
+  );
+}
+
+
+function AddOffer() {
+  const pending = useHoldStore((s) => s.pendingAdd);
+  const accept = useHoldStore((s) => s.acceptPendingAdd);
+  const decline = useHoldStore((s) => s.declinePendingAdd);
+  if (!pending) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-surface px-4 py-3 shadow-[var(--shadow-border)]">
+      <p className="min-w-0 text-sm text-fg">
+        Add <span className="font-medium">{pending.name}</span>?
+      </p>
+      <div className="flex shrink-0 gap-2">
+        <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={decline}>
+          No
+        </Button>
+        <Button type="button" size="sm" className="rounded-full" onClick={accept}>
+          Yes
+        </Button>
+      </div>
+    </div>
   );
 }
 
