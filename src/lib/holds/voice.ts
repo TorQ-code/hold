@@ -26,8 +26,8 @@ const WORD_NUM: Record<string, number> = {
   ninety: 90,
 };
 
-function clean(raw: string): string {
-  return raw
+function clean(raw: string | null | undefined): string {
+  return String(raw ?? "")
     .toLowerCase()
     .replace(/[!.?,]/g, " ")
     .replace(/\s+/g, " ")
@@ -164,6 +164,12 @@ export function matchMovement(query: string, movements: Movement[]): Movement | 
   const q = normalizeQuery(query);
   if (!q) return null;
 
+  const owner = uniqueNameTokens(movements);
+  if (!q.includes(" ")) {
+    const only = owner.get(q);
+    if (only) return only;
+  }
+
   const scored = movements
     .map((m) => ({ m, score: scoreMovement(q, m) }))
     .sort((a, b) => b.score - a.score);
@@ -179,16 +185,45 @@ function compact(s: string): string {
   return s.replace(/[\s-']/g, "");
 }
 
+const GENERIC_TOKENS = new Set(["hold", "timer", "stretch", "body", "deep", "desk", "reset", "opener"]);
+
+function stemWord(word: string): string {
+  const irregular: Record<string, string> = {
+    calves: "calf",
+    hanging: "hang",
+    planking: "plank",
+    squatting: "squat",
+    sitting: "sit",
+  };
+  if (irregular[word]) return irregular[word];
+  if (word.length > 4 && word.endsWith("es")) return word.slice(0, -2);
+  if (word.length > 3 && word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
 function normalizeQuery(raw: string): string {
   return clean(raw)
-    .replace(/\b(hangs|hanging)\b/g, "hang")
-    .replace(/\b(planks|planking|planked)\b/g, "plank")
-    .replace(/\b(squats|squatting)\b/g, "squat")
-    .replace(/\b(shoulders)\b/g, "shoulder")
-    .replace(/\b(calves)\b/g, "calf")
-    .replace(/\b(sits|sitting)\b/g, "sit")
-    .replace(/\s+/g, " ")
-    .trim();
+    .split(" ")
+    .filter(Boolean)
+    .map(stemWord)
+    .join(" ");
+}
+
+function uniqueNameTokens(movements: Movement[]): Map<string, Movement> {
+  const counts = new Map<string, Movement[]>();
+  for (const m of movements) {
+    const tokens = new Set(normalizeQuery(m.name).split(" ").filter(Boolean));
+    for (const token of tokens) {
+      const list = counts.get(token) ?? [];
+      if (!list.includes(m)) list.push(m);
+      counts.set(token, list);
+    }
+  }
+  const unique = new Map<string, Movement>();
+  for (const [token, list] of counts) {
+    if (list.length === 1 && !GENERIC_TOKENS.has(token)) unique.set(token, list[0]);
+  }
+  return unique;
 }
 
 function editDistance(a: string, b: string): number {
@@ -215,7 +250,7 @@ function closePhrase(q: string, name: string): number {
   const cq = compact(q);
   const cn = compact(name);
   if (cq === cn) return 92;
-  if (q.length >= 4 && (name.startsWith(q) || name.split(" ").includes(q))) return 80;
+  if (q.length >= 5 && !GENERIC_TOKENS.has(q) && (name.startsWith(q) || name.split(" ").includes(q))) return 80;
   if (name.length >= 6 && editDistance(cq, cn) === 1) return 74;
   return 0;
 }
@@ -228,7 +263,7 @@ function closeToken(q: string, name: string): boolean {
 
 function scoreMovement(q: string, m: Movement): number {
   const name = normalizeQuery(m.name);
-  const aliases = [name, ...m.aliases.map(normalizeQuery)];
+  const aliases = [name, ...(m.aliases ?? []).map(normalizeQuery)];
   let best = 0;
   for (const alias of aliases) best = Math.max(best, closePhrase(q, alias));
 
