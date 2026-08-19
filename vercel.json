@@ -1,5 +1,5 @@
 {
   "framework": null,
-  "installCommand": "npm install --include=dev",
-  "buildCommand": "npx vite build --config vite.config.mjs && npm run db:migrate"
+  "installCommand": "sh -c 'if [ -f package.json ]; then npm install --include=dev; else cd .. && npm install --include=dev; fi'",
+  "buildCommand": "sh -c 'if [ -f vite.config.ts ] || [ -f vite.config.mjs ]; then npx vite build && npm run db:migrate; else cd .. && npx vite build && npm run db:migrate; fi'"
 }
