@@ -290,6 +290,16 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
   startTimer: (movementId, opts) => {
     const movement = get().movements.find((m) => m.id === movementId);
     if (!movement) return;
+    // Starting a different movement while one is already running/paused used to just
+    // overwrite `timer` outright — confirmed via the running store: 13+ seconds on a
+    // held movement vanished with zero session logged the instant a different
+    // movement was started (reachable by voice — "start plank" — while hands-free
+    // listening stays active through an entire hold). Bank the abandoned hold as a
+    // completed session first, exactly as if the user had said "stop".
+    const cur = get().timer;
+    if (cur.movementId && cur.movementId !== movementId && (cur.running || cur.paused)) {
+      get().stopTimer();
+    }
     const seconds = opts?.seconds ?? null;
     const targetMs = seconds != null ? seconds * 1000 : movement.targetSeconds ? movement.targetSeconds * 1000 : null;
     const mode = opts?.mode ?? (seconds != null ? "down" : "up");
@@ -377,7 +387,10 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       return next;
     });
     releaseWakeLock();
-    if (get().settings.speak && durationMs >= 800) {
+    // Same threshold as the logging check above (durationMs >= 1000) — this used to be
+    // 800, so a hold between 800-999ms could get spoken as "complete" while nothing
+    // was actually saved to the log.
+    if (get().settings.speak && durationMs >= 1000) {
       const name = movements.find((m) => m.id === timer.movementId)?.name ?? "Hold";
       let line = `${name} complete. ${formatSpokenDuration(durationMs)}.`;
       if (personalBest) line += " Personal best.";
@@ -492,10 +505,14 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
   },
 
   fireDueReminders: () => {
-    const { reminders, settings, prompt } = get();
+    const { reminders, settings, prompt, timer } = get();
     if (prompt) return;
     const now = Date.now();
-    const due = reminders.find((r) => new Date(r.fireAt).getTime() <= now);
+    // Earliest fireAt among those due, not "first in array order" — reminders are only
+    // ever appended (see addReminder), so array order is add order, not schedule order.
+    const due = reminders
+      .filter((r) => new Date(r.fireAt).getTime() <= now)
+      .sort((a, b) => new Date(a.fireAt).getTime() - new Date(b.fireAt).getTime())[0];
     if (!due) return;
     set((s) => {
       const next = {
@@ -506,6 +523,13 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
       persist(sliceOf(next));
       return next;
     });
+    // BreakPrompt already hides itself while timer.overlay is true, so the visual
+    // prompt correctly waits until the hold ends. But chime/speak below were NOT
+    // gated the same way — confirmed: a reminder firing mid-hold played its chime and
+    // spoke "Time for X" over an active hold's cues, and speak() itself calls
+    // stopAudio() first, so it could cut a motivation cue off mid-sentence. Suppress
+    // both here; the prompt is still queued and appears the moment the hold ends.
+    if (timer.overlay) return;
     if (settings.chime) playChime();
     if (settings.speak) void speak(`Time for ${due.label}.`);
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {

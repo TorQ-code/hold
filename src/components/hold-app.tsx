@@ -298,7 +298,13 @@ function VoiceDock({ voice }: { voice: VoiceApi }) {
 function NextReminder({ onOpen }: { onOpen: () => void }) {
   const reminders = useHoldStore((s) => s.reminders);
   const now = useHoldStore((s) => s.now);
-  const next = reminders[0];
+  // reminders[0] was "whichever was added first," not "whichever fires soonest" —
+  // reminders are only ever appended, never re-sorted. Confirmed: setting a 30-minute
+  // reminder then a 5-minute one showed the 30-minute countdown here, with the 5-minute
+  // one silently due sooner and not reflected anywhere on screen.
+  const next = [...reminders].sort(
+    (a, b) => new Date(a.fireAt).getTime() - new Date(b.fireAt).getTime(),
+  )[0];
   if (!next) return null;
   const left = Math.max(0, new Date(next.fireAt).getTime() - now);
   return (
@@ -404,18 +410,22 @@ function MovementSection({ voice }: { voice: VoiceApi }) {
       <ul className="grid grid-cols-2 gap-3">
         {movements.map((m) => {
           const pb = selectPersonalBest(sessions, m.id);
+          // min-w-0 on every flex/grid link in this chain below: the name is
+          // free-typed (AddMovementDialog has no length cap), and one long unbroken
+          // word was confirmed to force this card past its grid column and overflow
+          // the whole page horizontally on a phone (395px content in a 375px viewport).
           return (
-            <li key={m.id}>
-              <article className="relative flex h-full min-h-28 flex-col rounded-xl bg-surface p-4 shadow-[var(--shadow-border)] transition-shadow hover:shadow-[var(--shadow-border-hover)]">
+            <li key={m.id} className="min-w-0">
+              <article className="relative flex h-full min-h-28 min-w-0 flex-col rounded-xl bg-surface p-4 shadow-[var(--shadow-border)] transition-shadow hover:shadow-[var(--shadow-border-hover)]">
                 <button
                   type="button"
                   onClick={() => {
                     unlockAudio();
                     startTimer(m.id);
                   }}
-                  className="flex flex-1 flex-col items-start text-left"
+                  className="flex min-w-0 flex-1 flex-col items-start text-left"
                 >
-                  <span className="font-medium leading-snug text-fg">{m.name}</span>
+                  <span className="block w-full truncate font-medium leading-snug text-fg">{m.name}</span>
                   <span className="mt-auto pt-6 font-mono text-sm tabular-nums text-muted">
                     {pb > 0 ? formatClock(pb, false) : m.targetSeconds ? `${m.targetSeconds}s` : "—"}
                   </span>
@@ -423,7 +433,14 @@ function MovementSection({ voice }: { voice: VoiceApi }) {
                 {editing ? (
                   <button
                     type="button"
-                    onClick={() => removeMovement(m.id)}
+                    onClick={() => {
+                      // A single tap here used to delete permanently — no confirmation,
+                      // no undo — right next to the card someone's actually trying to
+                      // tap in edit mode.
+                      if (window.confirm(`Remove ${m.name}? This can't be undone.`)) {
+                        removeMovement(m.id);
+                      }
+                    }}
                     className="absolute right-2 top-2 grid size-9 place-items-center rounded-full text-subtle hover:text-danger"
                     aria-label={`Remove ${m.name}`}
                   >
@@ -580,7 +597,9 @@ function ReminderSection() {
         </form>
         {reminders.length > 0 && (
           <ul className="mt-5 space-y-2">
-            {reminders.map((r) => {
+            {[...reminders]
+              .sort((a, b) => new Date(a.fireAt).getTime() - new Date(b.fireAt).getTime())
+              .map((r) => {
               const left = Math.max(0, new Date(r.fireAt).getTime() - now);
               return (
                 <li
