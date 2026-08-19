@@ -226,7 +226,7 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
   },
 
   applyCommand: (raw) => {
-    const { movements, timer, settings } = get();
+    const { movements, timer, settings, sessions } = get();
     const intent = parseCommand(raw, {
       timerActive: timer.running || timer.overlay,
       movements,
@@ -238,9 +238,15 @@ export const useHoldStore = create<HoldStore>((set, get) => ({
 
     switch (intent.type) {
       case "start": {
-        if (!intent.movementQuery) return say("Which exercise shall I start?");
-        const movement = matchMovement(intent.movementQuery, movements);
-        if (!movement) return say(`I don't have ${intent.movementQuery} on file.`);
+        let movement = intent.movementQuery ? matchMovement(intent.movementQuery, movements) : null;
+        if (!movement && !intent.movementQuery) {
+          const lastId = timer.movementId ?? sessions[0]?.movementId ?? null;
+          movement = lastId ? movements.find((m) => m.id === lastId) ?? null : null;
+        }
+        if (!movement && !intent.movementQuery) return say("Which exercise shall I start?");
+        if (!movement) {
+          return say(`I heard ${intent.movementQuery}. Say start dead hang, or start plank.`);
+        }
         if (timer.running && timer.movementId === movement.id) return movement.name;
         get().startTimer(movement.id, { seconds: intent.seconds });
         return `Beginning ${movement.name}.`;

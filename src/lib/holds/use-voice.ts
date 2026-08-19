@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { unlockAudio } from "./audio";
 import { isIOS } from "./platform";
-import { getSpeechRecognitionCtor, isVoiceBusy, parseCommand, setSpeakGate, speak, warmJarvis } from "./voice";
+import { getSpeechRecognitionCtor, isVoiceBusy, parseCommand, resolveHeard, setSpeakGate, speak, warmJarvis } from "./voice";
 import { useHoldStore } from "./store";
 
 export type VoiceApi = {
@@ -82,23 +82,35 @@ export function useVoice() {
     rec.continuous = !ios;
     rec.interimResults = true;
     rec.lang = "en-US";
-    rec.maxAlternatives = 3;
+    rec.maxAlternatives = 5;
 
     rec.onresult = (ev) => {
       if (isVoiceBusy() || pushingRef.current) return;
-      let interim = "";
-      let finalText = "";
-      for (let i = ev.resultIndex; i < ev.results.length; i++) {
-        const piece = ev.results[i][0].transcript;
-        if (ev.results[i].isFinal) finalText += piece;
-        else interim += piece;
-      }
-      const live = (finalText || interim).trim();
-      if (interim) setTranscript(interim, false);
-
       const state = useHoldStore.getState();
       const timerActive = state.timer.running || state.timer.overlay;
-      const early = parseCommand(live, { timerActive, movements: state.movements });
+      const finals: string[] = [];
+      let interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const row = ev.results[i];
+        const top = row[0]?.transcript ?? "";
+        if (row.isFinal) {
+          const n = Math.max(1, Math.min(row.length ?? 1, 5));
+          for (let a = 0; a < n; a++) {
+            const piece = row[a]?.transcript?.trim();
+            if (piece) finals.push(piece);
+          }
+        } else {
+          interim += top;
+        }
+      }
+      if (interim) setTranscript(interim, false);
+
+      const picked = resolveHeard(finals.length ? finals : interim ? [interim] : [], {
+        timerActive,
+        movements: state.movements,
+      });
+      const live = (picked?.text || interim).trim();
+      const early = picked?.intent ?? parseCommand(live, { timerActive, movements: state.movements });
       const now = Date.now();
       if ((early.type === "stop" || early.type === "pause") && now - lastStopAt.current > 1200) {
         lastStopAt.current = now;
@@ -107,9 +119,9 @@ export function useVoice() {
         if (ios) runningRef.current = false;
         return;
       }
-      if (finalText.trim()) {
-        setTranscript(finalText.trim(), true);
-        applyCommand(finalText.trim());
+      if (finals.length) {
+        setTranscript(live, true);
+        applyCommand(live);
         if (ios) runningRef.current = false;
       }
     };
