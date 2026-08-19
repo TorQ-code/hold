@@ -135,12 +135,12 @@ export function parseCommand(
     }
   }
 
-  // Initiation is "Start [exercise]" — also catch common ASR slips (star, starting).
-  const startAt = t.search(/\b(start|starting|started|star|stark|begin|beginning)\b/);
+  // Initiation is "Start [exercise]".
+  const startAt = t.search(/\b(start|starting|started|begin|beginning)\b/);
   if (startAt >= 0 && !/\bstart again\b/.test(t)) {
     let rest = t
       .slice(startAt)
-      .replace(/^(start|starting|started|star|stark|begin|beginning)\s+/, "");
+      .replace(/^(start|starting|started|begin|beginning)\s+/, "");
     const sec = parseSeconds(rest);
     let seconds: number | null = null;
     if (sec) {
@@ -153,8 +153,7 @@ export function parseCommand(
       .replace(/\b(for|on)\b/g, " ")
       .replace(/\s+/g, " ")
       .trim();
-    const stripped = stripFiller(rest);
-    const q = !stripped || /^(hold|it|this|one)$/.test(stripped) ? "" : stripped;
+    const q = stripFiller(rest);
     return { type: "start", movementQuery: q || null, seconds };
   }
 
@@ -162,7 +161,7 @@ export function parseCommand(
 }
 
 export function matchMovement(query: string, movements: Movement[]): Movement | null {
-  const q = foldSpeech(query);
+  const q = normalizeQuery(query);
   if (!q) return null;
 
   const scored = movements
@@ -170,9 +169,9 @@ export function matchMovement(query: string, movements: Movement[]): Movement | 
     .sort((a, b) => b.score - a.score);
 
   const best = scored[0];
-  if (!best || best.score < 22) return null;
+  if (!best || best.score < 68) return null;
   const runner = scored[1];
-  if (runner && best.score < 50 && best.score - runner.score < 5) return null;
+  if (runner && runner.score >= 68 && best.score - runner.score < 12) return null;
   return best.m;
 }
 
@@ -180,24 +179,16 @@ function compact(s: string): string {
   return s.replace(/[\s-']/g, "");
 }
 
-function foldSpeech(raw: string): string {
-  let s = clean(raw);
-  const swaps: [RegExp, string][] = [
-    [/\b(dad|ded|dette|debt)\b/g, "dead"],
-    [/\b(hand|hung|ham|hangs|hanging|hank)\b/g, "hang"],
-    [/\b(blank|plant|planked|planks|planking|planc)\b/g, "plank"],
-    [/\b(waltz|walled|walls)\b/g, "wall"],
-    [/\b(set|sat|sits|sitting|sitted)\b/g, "sit"],
-    [/\b(squad|scott|squats|squatting|squash)\b/g, "squat"],
-    [/\b(holo|hallo|hello|holla|hallow|hollowed)\b/g, "hollow"],
-    [/\b(cough|kalb|calves|casts)\b/g, "calf"],
-    [/\b(nick|nect)\b/g, "neck"],
-    [/\b(soldier|colder|shoulders)\b/g, "shoulder"],
-    [/\b(open her|opener|opening)\b/g, "opener"],
-    [/\b(deepest|deeper)\b/g, "deep"],
-  ];
-  for (const [re, to] of swaps) s = s.replace(re, to);
-  return s.replace(/\s+/g, " ").trim();
+function normalizeQuery(raw: string): string {
+  return clean(raw)
+    .replace(/\b(hangs|hanging)\b/g, "hang")
+    .replace(/\b(planks|planking|planked)\b/g, "plank")
+    .replace(/\b(squats|squatting)\b/g, "squat")
+    .replace(/\b(shoulders)\b/g, "shoulder")
+    .replace(/\b(calves)\b/g, "calf")
+    .replace(/\b(sits|sitting)\b/g, "sit")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function editDistance(a: string, b: string): number {
@@ -218,50 +209,36 @@ function editDistance(a: string, b: string): number {
   return row[b.length];
 }
 
-function fuzzyHit(a: string, b: string): number {
-  if (!a || !b) return 0;
-  if (a === b) return 100;
-  if (b.startsWith(a) || a.startsWith(b)) return 72;
-  if (b.includes(a) || a.includes(b)) return 56;
-  const ca = compact(a);
-  const cb = compact(b);
-  if (ca === cb) return 88;
-  const d = editDistance(ca, cb);
-  const max = Math.max(ca.length, cb.length);
-  if (d === 1 && max >= 3) return 68;
-  if (d === 2 && max >= 6) return 42;
-  if (d === 3 && max >= 10) return 28;
-  const ratio = 1 - d / max;
-  if (ratio >= 0.72) return Math.round(24 + ratio * 20);
+function closePhrase(q: string, name: string): number {
+  if (!q || !name) return 0;
+  if (q === name) return 100;
+  const cq = compact(q);
+  const cn = compact(name);
+  if (cq === cn) return 92;
+  if (q.length >= 4 && (name.startsWith(q) || name.split(" ").includes(q))) return 80;
+  if (name.length >= 6 && editDistance(cq, cn) === 1) return 74;
   return 0;
 }
 
+function closeToken(q: string, name: string): boolean {
+  if (q === name) return true;
+  if (q.length >= 5 && editDistance(q, name) === 1) return true;
+  return false;
+}
+
 function scoreMovement(q: string, m: Movement): number {
-  const name = foldSpeech(m.name);
-  const aliases = [name, ...m.aliases.map(foldSpeech)];
+  const name = normalizeQuery(m.name);
+  const aliases = [name, ...m.aliases.map(normalizeQuery)];
   let best = 0;
-  for (const alias of aliases) {
-    best = Math.max(best, fuzzyHit(q, alias));
-  }
+  for (const alias of aliases) best = Math.max(best, closePhrase(q, alias));
+
   const qWords = q.split(" ").filter(Boolean);
-  const nameWords = name.split(" ").filter(Boolean);
-  if (qWords.length) {
-    let tokenScore = 0;
-    let hits = 0;
-    for (const w of qWords) {
-      let wordBest = 0;
-      for (const alias of aliases) {
-        wordBest = Math.max(wordBest, fuzzyHit(w, alias));
-        for (const nw of alias.split(" ")) wordBest = Math.max(wordBest, fuzzyHit(w, nw));
+  const pools = aliases.map((a) => a.split(" ").filter(Boolean));
+  if (qWords.length >= 2) {
+    for (const pool of pools) {
+      if (qWords.every((w) => pool.some((n) => closeToken(w, n)))) {
+        best = Math.max(best, 76);
       }
-      if (wordBest >= 42) {
-        hits += 1;
-        tokenScore += wordBest;
-      }
-    }
-    if (hits === qWords.length) best = Math.max(best, Math.round(tokenScore / qWords.length) - 4);
-    else if (hits > 0 && nameWords.length > 1) {
-      best = Math.max(best, Math.round((tokenScore / qWords.length) * 0.55));
     }
   }
   return best;
