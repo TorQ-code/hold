@@ -147,10 +147,6 @@ export function useVoice() {
       }
       runningRef.current = false;
     });
-    if (useHoldStore.getState().settings.handsFree) {
-      wantRef.current = true;
-      boot();
-    }
     return () => {
       wantRef.current = false;
       try {
@@ -166,8 +162,6 @@ export function useVoice() {
 
   const start = useCallback(() => {
     unlockAudio();
-    const names = useHoldStore.getState().movements.map((m) => `Beginning ${m.name}.`);
-    warmJarvis(names);
     const canListen = Boolean(getSpeechRecognitionCtor()) || Boolean(navigator.mediaDevices?.getUserMedia);
     if (!canListen) {
       setVoiceError("Voice is not supported here. Type a command instead.");
@@ -176,8 +170,26 @@ export function useVoice() {
     wantRef.current = true;
     useHoldStore.getState().patchSettings({ handsFree: true });
     setListening(true);
-    boot();
-  }, [boot, setListening, setVoiceError]);
+    setNeedsGesture(false);
+    const names = useHoldStore.getState().movements.map((m) => `Beginning ${m.name}.`);
+    warmJarvis(names);
+    void (async () => {
+      if (navigator.mediaDevices?.getUserMedia) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          stream.getTracks().forEach((track) => track.stop());
+          setVoiceError(null);
+        } catch {
+          setVoiceError("Allow the microphone so HOLD can start and stop by voice.");
+          setNeedsGesture(true);
+          setListening(false);
+          wantRef.current = false;
+          return;
+        }
+      }
+      boot();
+    })();
+  }, [boot, setListening, setNeedsGesture, setVoiceError]);
 
   const stop = useCallback(() => {
     wantRef.current = false;

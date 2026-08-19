@@ -64,7 +64,7 @@ export const SEED_MOVEMENTS: Movement[] = [
 export const DEFAULT_SETTINGS: Settings = {
   speak: true,
   chime: true,
-  handsFree: true,
+  handsFree: false,
   motivateEvery: 15,
 };
 

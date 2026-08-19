@@ -38,22 +38,30 @@ export function HoldApp() {
   useCloudSync();
   const voice = useVoice();
 
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     hydrate();
     tick();
+    setReady(true);
     const id = window.setInterval(() => useHoldStore.getState().tick(), 80);
     return () => window.clearInterval(id);
   }, [hydrate, tick]);
-
-  useEffect(() => {
-    voice.start();
-  }, [voice.start]);
 
   useEffect(() => {
     const onFirst = () => unlockAudio();
     window.addEventListener("pointerdown", onFirst, { once: true });
     return () => window.removeEventListener("pointerdown", onFirst);
   }, []);
+
+  if (!ready) {
+    return (
+      <div className="min-h-dvh bg-bg text-fg">
+        <div className="mx-auto w-full max-w-2xl px-5 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8 sm:pt-10">
+          <p className="font-display text-5xl leading-none tracking-tight sm:text-6xl">HOLD</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -76,7 +84,7 @@ function Shell({ voice }: { voice: VoiceApi }) {
             <AppHeader />
             <VoiceDock voice={voice} />
             <NextReminder onOpen={() => setView("remind")} />
-            <MovementSection />
+            <MovementSection voice={voice} />
             <HomeNav onChange={setView} />
             <InstallHint />
           </>
@@ -157,9 +165,14 @@ function AppHeader() {
 function AuthSlot() {
   const { user, isPending } = useCurrentUserState();
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted || isPending) {
-    return <div className="size-11 animate-pulse rounded-full bg-surface-2" />;
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+    const id = window.setTimeout(() => setWaited(true), 1600);
+    return () => window.clearTimeout(id);
+  }, []);
+  if (!mounted || (isPending && !waited)) {
+    return <div className="size-11 rounded-full bg-surface-2" />;
   }
   if (!user) {
     return (
@@ -220,8 +233,8 @@ function VoiceDock({ voice }: { voice: VoiceApi }) {
             <Mic className="size-5" />
           </span>
           <span className="text-sm">
-            <span className="block font-medium text-fg">Tap to listen</span>
-            <span className="text-muted">Then say Start dead hang.</span>
+            <span className="block font-medium text-fg">Allow microphone</span>
+            <span className="text-muted">Tap once, then say Start dead hang.</span>
           </span>
         </button>
       )}
@@ -361,7 +374,7 @@ function InstallHint() {
   );
 }
 
-function MovementSection() {
+function MovementSection({ voice }: { voice: VoiceApi }) {
   const movements = useHoldStore((s) => s.movements);
   const sessions = useHoldStore((s) => s.sessions);
   const startTimer = useHoldStore((s) => s.startTimer);
@@ -396,7 +409,11 @@ function MovementSection() {
               <article className="relative flex h-full min-h-28 flex-col rounded-xl bg-surface p-4 shadow-[var(--shadow-border)] transition-shadow hover:shadow-[var(--shadow-border-hover)]">
                 <button
                   type="button"
-                  onClick={() => startTimer(m.id)}
+                  onClick={() => {
+                    unlockAudio();
+                    voice.start();
+                    startTimer(m.id);
+                  }}
                   className="flex flex-1 flex-col items-start text-left"
                 >
                   <span className="font-medium leading-snug text-fg">{m.name}</span>
@@ -495,6 +512,9 @@ function ReminderSection() {
   const [forId, setForId] = useState<string>("");
 
   function setMinutes(mins: number) {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
     addReminder(mins, forId || null);
   }
 
